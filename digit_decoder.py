@@ -11,12 +11,7 @@ import tensorflow as tf
 import numpy as np
 import digitStruct
 
-url = 'http://ufldl.stanford.edu/housenumbers/'
 last_percent_reported = None
-train_datafile = 'train/digitStruct.mat'
-test_datafile = 'test/digitStruct.mat'
-extra_datafile = 'extra/digitStruct.mat'
-pickle_filename = 'dataset.pickle'
 
 
 def download_progress_hook(count, blockSize, totalSize):
@@ -37,9 +32,10 @@ def download_progress_hook(count, blockSize, totalSize):
         last_percent_reported = percent
 
 
-def maybe_download(filename, expected_bytes):
+def maybe_download(url, expected_bytes):
+    filename = os.path.basename(url)
     print("attempting to download {}...".format(filename))
-    if not os.path.exists(filename):    
+    if not os.path.exists(filename):
         filename, _ = urlretrieve(url + filename, filename, reporthook=download_progress_hook)
     statinfo = os.stat(filename)
     if statinfo.st_size == expected_bytes:
@@ -75,16 +71,19 @@ def load_digit_data(data_file):
                 "left": bbox.left,
                 "top": bbox.top,
                 "width": bbox.width,
-                "height":bbox.height}
+                "height": bbox.height}
             })
         data[ds_obj.name] = digits
-        if len(data.keys()) >= 200:  # temporary, to keep fast
-            break
+        # if len(data.keys()) >= 2000:  # temporary, to keep fast
+        #     break
 
     return data
 
 
 def get_uber_bounding_box(digit_data):
+    """
+    Get the larger bounding box from the digit data (from the individual bounding boxes)
+    """
 
     '''
     print("getting uber box for:")
@@ -155,22 +154,14 @@ def load_images(image_folder, digit_data):
         # randomly crop to 54x54
         # r = np.random.randint(0, 9, 2)
         # crop2_data = resized_data[r[0]:r[0]+54, r[1]:r[1]+54]
+        # images[image_index, :, :, :] = crop2_data
 
-        #images[image_index, :, :, :] = crop2_data
         images[image_index, :, :, :] = resized_data
 
         label = np.zeros(shape=5)
         label[len(data)-1 if len(data) < 5 else 4] = 1.0
         num_digits_labels[image_index, :] = label
 
-        # plt.imshow(image_data, interpolation=None)
-        # plt.show()
-        # plt.imshow(cropped_data, interpolation=None)
-        # plt.show()
-        # plt.imshow(resized_data, interpolation=None)
-        # plt.show()
-        # plt.imshow(crop2_data, interpolation=None)
-        # plt.show()
 
         image_index += 1
 
@@ -194,34 +185,39 @@ def pickle_data(dataset):
     except Exception as e:
         print('Unable to save data to', pickle_filename, ':', e)
 
+pickle_filename = 'dataset.pickle'
 
-train_archive = maybe_download('train.tar.gz', 404141560)
-test_archive = maybe_download('test.tar.gz', 276555967)
-extra_archive = maybe_download('extra.tar.gz', 1955489752)
-force_rebuild_data = True
+train_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/train.tar.gz', 404141560)
+test_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/test.tar.gz', 276555967)
+force_rebuild_data = False
 
+# extract and split the test data into test and validation
 train_folder = maybe_extract(train_archive)
 test_folder = maybe_extract(test_archive)
-extra_folder = maybe_extract(extra_archive)
+valid_folder = "validation"
+if not os.path.exists(valid_folder):
+    os.mkdir(valid_folder)
+    png_files = [os.path.join(test_folder, f) for f in os.listdir(test_folder) if os.path.splitext(f)[1] == ".png"]
+    for f in png_files[:10000]:
+        os.rename(f, f.replace(test_folder, valid_folder))
 
 dataset = get_data_from_pickle()
 if force_rebuild_data or not dataset:
     print("No pickle data...")
-    train_data = load_digit_data(train_datafile)
-    test_data = load_digit_data(test_datafile)
-    extra_data = load_digit_data(extra_datafile)
+    train_data = load_digit_data('train/digitStruct.mat')
+    test_data = load_digit_data('test/digitStruct.mat')
 
     train_images, train_num_labels = load_images(train_folder, train_data)
+    valid_images, valid_num_labels = load_images(valid_folder, test_data)  # the data is in test_data for both
     test_images, test_num_labels = load_images(test_folder, test_data)
-    extra_images, extra_num_labels = load_images(extra_folder, extra_data)
 
     dataset = {
         'train_images': train_images,
         'train_num_labels': train_num_labels,
+        'valid_images': valid_images,
+        'valid_num_labels': valid_num_labels,
         'test_images': test_images,
-        'test_num_labels': test_num_labels,
-        'extra_images': extra_images,
-        'extra_num_labels': extra_num_labels
+        'test_num_labels': test_num_labels
     }
     print("Picking data...")
     pickle_data(dataset)
@@ -229,21 +225,22 @@ else:
     print("Found pickle data...")
     train_images = dataset['train_images']
     train_num_labels = dataset['train_num_labels']
+    valid_images = dataset['valid_images']
+    valid_num_labels = dataset['valid_num_labels']
     test_images = dataset['test_images']
     test_num_labels = dataset['test_num_labels']
-    extra_images = dataset['extra_images']
-    extra_num_labels = dataset['extra_num_labels']
     print("Training images: {}".format(len(train_images)))
     print("Training labels: {}".format(len(train_num_labels)))
+    print("Validation images: {}".format(len(test_images)))
+    print("Validation labels: {}".format(len(test_num_labels)))
     print("Test images: {}".format(len(test_images)))
     print("Test labels: {}".format(len(test_num_labels)))
-    print("Extra images: {}".format(len(extra_images)))
-    print("Extra labels: {}".format(len(extra_num_labels)))
 
 
 def accuracy(predictions, labels):
     return (100.0 * np.sum(np.argmax(predictions, 1) == np.argmax(labels, 1))
             / predictions.shape[0])
+
 
 image_size = 64
 num_labels = 5
@@ -259,8 +256,8 @@ with graph.as_default():
     tf_train_dataset = tf.placeholder(
         tf.float32, shape=(batch_size, image_size, image_size, num_channels))
     tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
-    tf_valid_dataset = tf.constant(test_images)
-    tf_test_dataset = tf.constant(extra_images)
+    tf_valid_dataset = tf.constant(valid_images)
+    tf_test_dataset = tf.constant(test_images)
 
     # Variables.
     layer1_weights = tf.Variable(tf.truncated_normal(
