@@ -12,6 +12,8 @@ import numpy as np
 import digitStruct
 
 last_percent_reported = None
+DEBUG_MODE = False
+FORCE_REBUILD = True
 
 
 def download_progress_hook(count, blockSize, totalSize):
@@ -74,8 +76,8 @@ def load_digit_data(data_file):
                 "height": bbox.height}
             })
         data[ds_obj.name] = digits
-        # if len(data.keys()) >= 2000:  # temporary, to keep fast
-        #     break
+        if DEBUG_MODE and len(data.keys()) >= 4:  # temporary, to keep fast
+            break
 
     return data
 
@@ -128,17 +130,20 @@ def get_uber_bounding_box(digit_data):
 
 
 def load_images(image_folder, digit_data):
-    num_samples = len(digit_data)
+    pixel_depth = 255.0
+
+    # remove images that don't exist
+    real_data = [(filename, data) for filename, data in digit_data.items()
+                 if os.path.exists(os.path.join(image_folder, filename))]
+
+    num_samples = len(real_data)
     images = np.ndarray(dtype=np.float32, shape=(num_samples, 64, 64, 3))
     num_digits_labels = np.ndarray(dtype=np.float32, shape=(num_samples, 5))  # labels, hot 1 encoding
     image_index = 0
-    for filename, data in digit_data.items():
+    for filename, data in real_data:
         pathname = os.path.join(image_folder, filename)
-        if not os.path.exists(pathname):
-            print("Cannot find file: {}, skipping".format(filename))
-            continue
         print("loading image: {}".format(pathname))
-        image_data = ndimage.imread(pathname)
+        image_data = (ndimage.imread(pathname).astype(float) - pixel_depth / 2) / pixel_depth
 
         # find uber bounding box
         uber_bbox = get_uber_bounding_box(data)
@@ -156,12 +161,15 @@ def load_images(image_folder, digit_data):
         # crop2_data = resized_data[r[0]:r[0]+54, r[1]:r[1]+54]
         # images[image_index, :, :, :] = crop2_data
 
+        if DEBUG_MODE:
+            plt.imshow(resized_data, interpolation=None)
+            plt.show()
+
         images[image_index, :, :, :] = resized_data
 
         label = np.zeros(shape=5)
         label[len(data)-1 if len(data) < 5 else 4] = 1.0
         num_digits_labels[image_index, :] = label
-
 
         image_index += 1
 
@@ -189,7 +197,7 @@ pickle_filename = 'dataset.pickle'
 
 train_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/train.tar.gz', 404141560)
 test_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/test.tar.gz', 276555967)
-force_rebuild_data = False
+
 
 # extract and split the test data into test and validation
 train_folder = maybe_extract(train_archive)
@@ -202,7 +210,7 @@ if not os.path.exists(valid_folder):
         os.rename(f, f.replace(test_folder, valid_folder))
 
 dataset = get_data_from_pickle()
-if force_rebuild_data or not dataset:
+if FORCE_REBUILD or not dataset:
     print("No pickle data...")
     train_data = load_digit_data('train/digitStruct.mat')
     test_data = load_digit_data('test/digitStruct.mat')
@@ -291,7 +299,7 @@ with graph.as_default():
         tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits))
 
     # Optimizer.
-    optimizer = tf.train.GradientDescentOptimizer(0.05).minimize(loss)
+    optimizer = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
 
     # Predictions for the training, validation, and test data.
     train_prediction = tf.nn.softmax(logits)
