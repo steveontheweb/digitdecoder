@@ -13,7 +13,7 @@ import digitStruct
 
 last_percent_reported = None
 DEBUG_MODE = False
-FORCE_REBUILD = True
+FORCE_REBUILD = False
 
 
 def download_progress_hook(count, blockSize, totalSize):
@@ -261,24 +261,19 @@ num_channels = 3
 graph = tf.Graph()
 with graph.as_default():
     # Input data.
-    tf_train_dataset = tf.placeholder(
-        tf.float32, shape=(batch_size, image_size, image_size, num_channels))
+    tf_train_dataset = tf.placeholder(tf.float32, shape=(batch_size, image_size, image_size, num_channels))
     tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
     tf_valid_dataset = tf.constant(valid_images)
     tf_test_dataset = tf.constant(test_images)
 
     # Variables.
-    layer1_weights = tf.Variable(tf.truncated_normal(
-        [patch_size, patch_size, num_channels, depth], stddev=0.1))
+    layer1_weights = tf.Variable(tf.truncated_normal([patch_size, patch_size, num_channels, depth], stddev=0.1))
     layer1_biases = tf.Variable(tf.zeros([depth]))
-    layer2_weights = tf.Variable(tf.truncated_normal(
-        [patch_size, patch_size, depth, depth], stddev=0.1))
+    layer2_weights = tf.Variable(tf.truncated_normal([patch_size, patch_size, depth, depth], stddev=0.1))
     layer2_biases = tf.Variable(tf.constant(1.0, shape=[depth]))
-    layer3_weights = tf.Variable(tf.truncated_normal(
-        [image_size // 4 * image_size // 4 * depth, num_hidden], stddev=0.1))
+    layer3_weights = tf.Variable(tf.truncated_normal([image_size // 4 * image_size // 4 * depth, num_hidden], stddev=0.1))
     layer3_biases = tf.Variable(tf.constant(1.0, shape=[num_hidden]))
-    layer4_weights = tf.Variable(tf.truncated_normal(
-        [num_hidden, num_labels], stddev=0.1))
+    layer4_weights = tf.Variable(tf.truncated_normal([num_hidden, num_labels], stddev=0.1))
     layer4_biases = tf.Variable(tf.constant(1.0, shape=[num_labels]))
 
     # Model.
@@ -295,8 +290,7 @@ with graph.as_default():
 
     # Training computation.
     logits = model(tf_train_dataset)
-    loss = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits))
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits))
 
     # Optimizer.
     optimizer = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
