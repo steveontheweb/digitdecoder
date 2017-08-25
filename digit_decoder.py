@@ -174,6 +174,7 @@ def load_images(image_folder, digit_data):
         image_index += 1
 
     print("num_digits_labels = {}".format(num_digits_labels))
+
     return images, num_digits_labels
 
 
@@ -219,6 +220,7 @@ if FORCE_REBUILD or not dataset:
     valid_images, valid_num_labels = load_images(valid_folder, test_data)  # the data is in test_data for both
     test_images, test_num_labels = load_images(test_folder, test_data)
 
+
     dataset = {
         'train_images': train_images,
         'train_num_labels': train_num_labels,
@@ -239,8 +241,8 @@ else:
     test_num_labels = dataset['test_num_labels']
     print("Training images: {}".format(len(train_images)))
     print("Training labels: {}".format(len(train_num_labels)))
-    print("Validation images: {}".format(len(test_images)))
-    print("Validation labels: {}".format(len(test_num_labels)))
+    print("Validation images: {}".format(len(valid_images)))
+    print("Validation labels: {}".format(len(valid_num_labels)))
     print("Test images: {}".format(len(test_images)))
     print("Test labels: {}".format(len(test_num_labels)))
 
@@ -300,7 +302,7 @@ with graph.as_default():
     valid_prediction = tf.nn.softmax(model(tf_valid_dataset))
     test_prediction = tf.nn.softmax(model(tf_test_dataset))
 
-num_steps = 1001
+num_steps = 50001
 
 with tf.Session(graph=graph) as session:
     tf.global_variables_initializer().run()
@@ -310,11 +312,9 @@ with tf.Session(graph=graph) as session:
         batch_data = train_images[offset:(offset + batch_size), :, :, :]
         batch_labels = train_num_labels[offset:(offset + batch_size), :]
         feed_dict = {tf_train_dataset: batch_data, tf_train_labels: batch_labels}
-        _, l, predictions = session.run(
-            [optimizer, loss, train_prediction], feed_dict=feed_dict)
+        _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
         if step % 50 == 0:
             print('Minibatch loss at step %d: %f' % (step, l))
             print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
-            print('Validation accuracy: %.1f%%' % accuracy(
-                valid_prediction.eval(), test_num_labels))
+            print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_num_labels))
     print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_num_labels))
