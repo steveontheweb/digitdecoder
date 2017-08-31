@@ -266,6 +266,7 @@ with graph.as_default():
     tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
     tf_valid_dataset = tf.constant(valid_images)
     tf_test_dataset = tf.constant(test_images)
+    tf_single_dataset = tf.placeholder(tf.float32, shape=(1, image_size, image_size, num_channels), name="dataset")
 
     # Variables.
     layer1_weights = tf.Variable(tf.truncated_normal([patch_size, patch_size, num_channels, 16], stddev=0.1))
@@ -290,9 +291,9 @@ with graph.as_default():
         conv = tf.nn.conv2d(data, layer1_weights, [1, 2, 2, 1], padding='SAME')
         conv = tf.nn.relu(conv + layer1_biases)
         conv = tf.nn.conv2d(conv, layer2_weights, [1, 1, 1, 1], padding='SAME')
-        conv = tf.nn.max_pool(tf.nn.relu(conv + layer2_biases), [1, 2, 2, 1], [1, 2, 2, 1], padding='SAME')
+        conv = tf.nn.max_pool(tf.nn.relu(conv + layer2_biases), [1, 4, 4, 1], [1, 2, 2, 1], padding='SAME')
         conv = tf.nn.conv2d(conv, layer3_weights, [1, 1, 1, 1], padding='SAME')
-        conv = tf.nn.max_pool(tf.nn.relu(conv + layer3_biases), [1, 2, 2, 1], [1, 2, 2, 1], padding='SAME')
+        conv = tf.nn.max_pool(tf.nn.relu(conv + layer3_biases), [1, 4, 4, 1], [1, 2, 2, 1], padding='SAME')
         conv = tf.nn.conv2d(conv, layer4_weights, [1, 1, 1, 1], padding='SAME')
         conv = tf.nn.relu(conv + layer4_biases)
         conv = tf.nn.conv2d(conv, layer5_weights, [1, 1, 1, 1], padding='SAME')
@@ -302,9 +303,9 @@ with graph.as_default():
         shape = conv.get_shape().as_list()
         fc = tf.reshape(conv, [shape[0], shape[1] * shape[2] * shape[3]])
         fc = tf.nn.relu(tf.matmul(fc, layer6_weights) + layer6_biases)
-        fc = tf.nn.dropout(fc, 0.75)
+        # fc = tf.nn.dropout(fc, 0.75)
 
-        return tf.matmul(fc, layer7_weights) + layer7_biases
+        return tf.nn.xw_plus_b(fc, layer7_weights, layer7_biases)
 
 
     # Training computation.
@@ -318,8 +319,9 @@ with graph.as_default():
     train_prediction = tf.nn.softmax(logits)
     valid_prediction = tf.nn.softmax(model(tf_valid_dataset))
     test_prediction = tf.nn.softmax(model(tf_test_dataset))
+    single_prediction = tf.nn.softmax(model(tf_single_dataset), name="model")
 
-num_steps = 100000
+num_steps = 10000
 
 with tf.Session(graph=graph) as session:
     tf.global_variables_initializer().run()
@@ -335,3 +337,9 @@ with tf.Session(graph=graph) as session:
             print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
             print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_num_labels))
     print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_num_labels))
+
+    saver = tf.train.Saver()
+    inference_folder = os.path.join(os.path.dirname(__file__), "inference")
+    if not os.path.exists(inference_folder):
+        os.mkdir(inference_folder)
+    saver.save(session, os.path.join(inference_folder, "test"))
