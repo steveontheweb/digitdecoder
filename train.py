@@ -11,11 +11,10 @@ import tensorflow as tf
 import numpy as np
 import digitStruct
 
-last_percent_reported = None
 DEBUG_MODE = False
 FORCE_REBUILD = False
 
-
+last_percent_reported = None
 def download_progress_hook(count, blockSize, totalSize):
     """A hook to report the progress of a download. This is mostly intended for users with
     slow internet connections. Reports every 1% change in download progress.
@@ -34,18 +33,19 @@ def download_progress_hook(count, blockSize, totalSize):
         last_percent_reported = percent
 
 
-def maybe_download(url, expected_bytes):
+def maybe_download(url, expected_bytes, target_folder):
     filename = os.path.basename(url)
+    full_target_path = os.path.join(target_folder, filename)
     print("attempting to download {}...".format(filename))
     if not os.path.exists(filename):
-        filename, _ = urlretrieve(url + filename, filename, reporthook=download_progress_hook)
+        filename, _ = urlretrieve(url, full_target_path, reporthook=download_progress_hook)
     statinfo = os.stat(filename)
     if statinfo.st_size == expected_bytes:
         print('Found and verified %s' % filename)
     else:
         print(statinfo.st_size)
         raise Exception('Failed to verify ' + filename + '. Can you get to it with a browser?')
-    return filename
+    return full_target_path
 
 
 def maybe_extract(filename, force=False):
@@ -131,6 +131,7 @@ def get_uber_bounding_box(digit_data):
 
 def load_images(image_folder, digit_data):
     pixel_depth = 255.0
+    num_labels = 7 + 10*5
 
     # remove images that don't exist
     real_data = [(filename, data) for filename, data in digit_data.items()
@@ -138,7 +139,13 @@ def load_images(image_folder, digit_data):
 
     num_samples = len(real_data)
     images = np.ndarray(dtype=np.float32, shape=(num_samples, 64, 64, 3))
-    num_digits_labels = np.ndarray(dtype=np.float32, shape=(num_samples, 5))  # labels, hot 1 encoding
+
+    # labels are organized as follows:
+    #   [0-6]: number of digits (hot-1)
+    #   [7-16]: digit 1 (hot-1)
+    #   [17-26]: digit 2 (hot-1)
+    #   ...
+    labels = np.ndarray(dtype=np.float32, shape=(num_samples, num_labels))  # labels, hot 1 encoding
     image_index = 0
     for filename, data in real_data:
         pathname = os.path.join(image_folder, filename)
@@ -167,15 +174,22 @@ def load_images(image_folder, digit_data):
 
         images[image_index, :, :, :] = resized_data
 
-        label = np.zeros(shape=5)
-        label[len(data)-1 if len(data) < 5 else 4] = 1.0
-        num_digits_labels[image_index, :] = label
+        label = np.zeros(shape=num_labels)
+        label[len(data) if len(data) < 6 else 6] = 1.0  # num digits
+        if 0 < len(data) < 6:
+            for d in range(len(data)):
+                try:
+                    label[7 + d*10 + data[d]['digit']] = 1.0  # digit d
+                except:
+                    # sometimes the data might have "10" as a digit or other strangeness... just skip the "1"
+                    pass
+        labels[image_index, :] = label
 
         image_index += 1
 
-    print("num_digits_labels = {}".format(num_digits_labels))
+    print("labels = {}".format(labels))
 
-    return images, num_digits_labels
+    return images, labels
 
 
 def get_data_from_pickle():
@@ -194,18 +208,20 @@ def pickle_data(dataset):
     except Exception as e:
         print('Unable to save data to', pickle_filename, ':', e)
 
-pickle_filename = 'dataset.pickle'
+pickle_filename = 'data/dataset.pickle'
 
-train_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/train.tar.gz', 404141560)
-test_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/test.tar.gz', 276555967)
+if not os.path.exists('data'):
+    os.mkdir('data')
+train_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/train.tar.gz', 404141560, 'data')
+test_archive = maybe_download('http://ufldl.stanford.edu/housenumbers/test.tar.gz', 276555967, 'data')
 
 
 # extract and split the test data into test and validation
 train_folder = maybe_extract(train_archive)
 test_folder = maybe_extract(test_archive)
-valid_folder = "validation"
+valid_folder = "data/validation"
 if not os.path.exists(valid_folder):
-    os.mkdir(valid_folder)
+    os.makedirs(valid_folder)
     png_files = [os.path.join(test_folder, f) for f in os.listdir(test_folder) if os.path.splitext(f)[1] == ".png"]
     for f in png_files[:10000]:
         os.rename(f, f.replace(test_folder, valid_folder))
@@ -213,38 +229,38 @@ if not os.path.exists(valid_folder):
 dataset = get_data_from_pickle()
 if FORCE_REBUILD or not dataset:
     print("No pickle data...")
-    train_data = load_digit_data('train/digitStruct.mat')
-    test_data = load_digit_data('test/digitStruct.mat')
+    train_data = load_digit_data('data/train/digitStruct.mat')
+    test_data = load_digit_data('data/test/digitStruct.mat')
 
-    train_images, train_num_labels = load_images(train_folder, train_data)
-    valid_images, valid_num_labels = load_images(valid_folder, test_data)  # the data is in test_data for both
-    test_images, test_num_labels = load_images(test_folder, test_data)
+    train_images, train_labels = load_images(train_folder, train_data)
+    valid_images, valid_labels = load_images(valid_folder, test_data)  # the data is in test_data for both
+    test_images, test_labels = load_images(test_folder, test_data)
 
 
     dataset = {
         'train_images': train_images,
-        'train_num_labels': train_num_labels,
+        'train_labels': train_labels,
         'valid_images': valid_images,
-        'valid_num_labels': valid_num_labels,
+        'valid_labels': valid_labels,
         'test_images': test_images,
-        'test_num_labels': test_num_labels
+        'test_labels': test_labels
     }
     print("Picking data...")
     pickle_data(dataset)
 else:
     print("Found pickle data...")
     train_images = dataset['train_images']
-    train_num_labels = dataset['train_num_labels']
+    train_labels = dataset['train_labels']
     valid_images = dataset['valid_images']
-    valid_num_labels = dataset['valid_num_labels']
+    valid_labels = dataset['valid_labels']
     test_images = dataset['test_images']
-    test_num_labels = dataset['test_num_labels']
+    test_labels = dataset['test_labels']
     print("Training images: {}".format(len(train_images)))
-    print("Training labels: {}".format(len(train_num_labels)))
+    print("Training labels: {}".format(len(train_labels)))
     print("Validation images: {}".format(len(valid_images)))
-    print("Validation labels: {}".format(len(valid_num_labels)))
+    print("Validation labels: {}".format(len(valid_labels)))
     print("Test images: {}".format(len(test_images)))
-    print("Test labels: {}".format(len(test_num_labels)))
+    print("Test labels: {}".format(len(test_labels)))
 
 
 def accuracy(predictions, labels):
@@ -253,7 +269,7 @@ def accuracy(predictions, labels):
 
 
 image_size = 64
-num_labels = 5
+num_labels = 7 + 10*5
 batch_size = 16
 patch_size = 5
 num_hidden = 64
@@ -298,22 +314,56 @@ with graph.as_default():
         conv = tf.nn.relu(conv + layer4_biases)
         conv = tf.nn.conv2d(conv, layer5_weights, [1, 1, 1, 1], padding='SAME')
         conv = tf.nn.relu(conv + layer5_biases)
+        conv = tf.nn.dropout(conv, 0.5)
 
         # Fully Connected Layer
         shape = conv.get_shape().as_list()
         fc = tf.reshape(conv, [shape[0], shape[1] * shape[2] * shape[3]])
         fc = tf.nn.relu(tf.matmul(fc, layer6_weights) + layer6_biases)
-        # fc = tf.nn.dropout(fc, 0.75)
 
         return tf.nn.xw_plus_b(fc, layer7_weights, layer7_biases)
 
 
     # Training computation.
     logits = model(tf_train_dataset)
-    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits))
+    
+    # Separate out digits, nums
+    num_digits_logits = logits[:, 0:7]
+    digit1_logits = logits[:, 7:17]
+    digit2_logits = logits[:, 17:27]
+    digit3_logits = logits[:, 27:37]
+    digit4_logits = logits[:, 37:47]
+    digit5_logits = logits[:, 47:57]
+
+    num_digits_labels = tf_train_labels[:, 0:7]
+
+    # make a vector that we can multiply the losses by (we should ignore any digit that "doesn't exist")
+    num_digits_vector = [
+        tf.reduce_sum(num_digits_labels[:, 1:7]),
+        tf.reduce_sum(num_digits_labels[:, 2:7]),
+        tf.reduce_sum(num_digits_labels[:, 3:7]),
+        tf.reduce_sum(num_digits_labels[:, 4:7]),
+        tf.reduce_sum(num_digits_labels[:, 5:7])
+    ]
+
+    digit1_labels = tf_train_labels[:, 7:17]
+    digit2_labels = tf_train_labels[:, 17:27]
+    digit3_labels = tf_train_labels[:, 27:37]
+    digit4_labels = tf_train_labels[:, 37:47]
+    digit5_labels = tf_train_labels[:, 47:57]
+
+    #loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits))
+    loss = tf.reduce_mean(
+        tf.nn.softmax_cross_entropy_with_logits(labels=num_digits_labels, logits=num_digits_logits) +
+        tf.multiply(num_digits_vector[0], tf.nn.softmax_cross_entropy_with_logits(labels=digit1_labels, logits=digit1_logits)) +
+        tf.multiply(num_digits_vector[1], tf.nn.softmax_cross_entropy_with_logits(labels=digit2_labels, logits=digit2_logits)) +
+        tf.multiply(num_digits_vector[2], tf.nn.softmax_cross_entropy_with_logits(labels=digit3_labels, logits=digit3_logits)) +
+        tf.multiply(num_digits_vector[3], tf.nn.softmax_cross_entropy_with_logits(labels=digit4_labels, logits=digit4_logits)) +
+        tf.multiply(num_digits_vector[4], tf.nn.softmax_cross_entropy_with_logits(labels=digit5_labels, logits=digit5_logits))
+    )
 
     # Optimizer.
-    optimizer = tf.train.GradientDescentOptimizer(0.001).minimize(loss)
+    optimizer = tf.train.GradientDescentOptimizer(0.005).minimize(loss)
 
     # Predictions for the training, validation, and test data.
     train_prediction = tf.nn.softmax(logits)
@@ -321,25 +371,28 @@ with graph.as_default():
     test_prediction = tf.nn.softmax(model(tf_test_dataset))
     single_prediction = tf.nn.softmax(model(tf_single_dataset), name="model")
 
-num_steps = 10000
+num_steps = 50000
 
 with tf.Session(graph=graph) as session:
     tf.global_variables_initializer().run()
     print('Initialized')
     for step in range(num_steps):
-        offset = (step * batch_size) % (train_num_labels.shape[0] - batch_size)
+        offset = (step * batch_size) % (train_labels.shape[0] - batch_size)
         batch_data = train_images[offset:(offset + batch_size), :, :, :]
-        batch_labels = train_num_labels[offset:(offset + batch_size), :]
+        batch_labels = train_labels[offset:(offset + batch_size), :]
         feed_dict = {tf_train_dataset: batch_data, tf_train_labels: batch_labels}
         _, l, predictions = session.run([optimizer, loss, train_prediction], feed_dict=feed_dict)
         if step % 50 == 0:
-            print('Minibatch loss at step %d: %f' % (step, l))
-            print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
-            print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_num_labels))
-    print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_num_labels))
+            print('Minibatch step {s}: loss: {l}, accuracy: {a}, validation accuracy:{v}'.format(
+                s=step,
+                l=l,
+                a=accuracy(predictions, batch_labels),
+                v=accuracy(valid_prediction.eval(), valid_labels)))
+
+    print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_labels))
 
     saver = tf.train.Saver()
-    inference_folder = os.path.join(os.path.dirname(__file__), "inference")
+    inference_folder = os.path.join(os.path.dirname(__file__), "inference", strftime("%Y-%m-%d-%H-%M", gmtime()))
     if not os.path.exists(inference_folder):
         os.mkdir(inference_folder)
-    saver.save(session, os.path.join(inference_folder, "test"))
+    saver.save(session, os.path.join(inference_folder, "model"))
