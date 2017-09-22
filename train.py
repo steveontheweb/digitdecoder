@@ -37,9 +37,9 @@ def maybe_download(url, expected_bytes, target_folder):
     filename = os.path.basename(url)
     full_target_path = os.path.join(target_folder, filename)
     print("attempting to download {}...".format(filename))
-    if not os.path.exists(filename):
+    if not os.path.exists(full_target_path):
         filename, _ = urlretrieve(url, full_target_path, reporthook=download_progress_hook)
-    statinfo = os.stat(filename)
+    statinfo = os.stat(full_target_path)
     if statinfo.st_size == expected_bytes:
         print('Found and verified %s' % filename)
     else:
@@ -50,6 +50,7 @@ def maybe_download(url, expected_bytes, target_folder):
 
 def maybe_extract(filename, force=False):
     root = os.path.splitext(os.path.splitext(filename)[0])[0]  # remove .tar.gz
+    target_folder = os.path.dirname(filename)
     if os.path.isdir(root) and not force:
         # You may override by setting force=True.
         print('%s already present - Skipping extraction of %s.' % (root, filename))
@@ -57,7 +58,7 @@ def maybe_extract(filename, force=False):
         print('Extracting data for %s. This may take a while. Please wait.' % root)
         tar = tarfile.open(filename)
         sys.stdout.flush()
-        tar.extractall()
+        tar.extractall(path=target_folder)
         tar.close()
     return root
 
