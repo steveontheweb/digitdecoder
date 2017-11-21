@@ -15,6 +15,8 @@ DEBUG_MODE = True
 FORCE_REBUILD = True
 
 last_percent_reported = None
+
+
 def download_progress_hook(count, blockSize, totalSize):
     """A hook to report the progress of a download. This is mostly intended for users with
     slow internet connections. Reports every 1% change in download progress.
@@ -37,9 +39,9 @@ def maybe_download(url, expected_bytes, target_folder):
     filename = os.path.basename(url)
     full_target_path = os.path.join(target_folder, filename)
     print("attempting to download {}...".format(filename))
-    if not os.path.exists(filename):
+    if not os.path.exists(full_target_path):
         filename, _ = urlretrieve(url, full_target_path, reporthook=download_progress_hook)
-    statinfo = os.stat(filename)
+    statinfo = os.stat(full_target_path)
     if statinfo.st_size == expected_bytes:
         print('Found and verified %s' % filename)
     else:
@@ -50,6 +52,7 @@ def maybe_download(url, expected_bytes, target_folder):
 
 def maybe_extract(filename, force=False):
     root = os.path.splitext(os.path.splitext(filename)[0])[0]  # remove .tar.gz
+    target_folder = os.path.dirname(filename)
     if os.path.isdir(root) and not force:
         # You may override by setting force=True.
         print('%s already present - Skipping extraction of %s.' % (root, filename))
@@ -57,7 +60,7 @@ def maybe_extract(filename, force=False):
         print('Extracting data for %s. This may take a while. Please wait.' % root)
         tar = tarfile.open(filename)
         sys.stdout.flush()
-        tar.extractall()
+        tar.extractall(path=target_folder)
         tar.close()
     return root
 
@@ -141,7 +144,7 @@ def load_images(image_folder, digit_data):
     images = np.ndarray(dtype=np.float32, shape=(num_samples, 64, 64, 3))
 
     # labels are organized as follows:
-    #   [0-6]: number of digits (hot-1)
+    #   [0-6]: number of digits (hot-1).  0=0 digits, 1=1 digit, ... 6=more than 5
     #   [7-16]: digit 1 (hot-1)
     #   [17-26]: digit 2 (hot-1)
     #   ...
@@ -150,7 +153,13 @@ def load_images(image_folder, digit_data):
     for filename, data in real_data:
         pathname = os.path.join(image_folder, filename)
         print("loading image: {}".format(pathname))
-        image_data = (ndimage.imread(pathname).astype(float) - pixel_depth / 2) / pixel_depth
+        image_data = ndimage.imread(pathname).astype(float)
+
+        if DEBUG_MODE:
+            plt.imshow(image_data, interpolation=None)
+            plt.show()
+
+        image_data = (image_data - pixel_depth / 2) / pixel_depth
 
         # find uber bounding box
         uber_bbox = get_uber_bounding_box(data)
@@ -160,17 +169,29 @@ def load_images(image_folder, digit_data):
                        uber_bbox["top"]:uber_bbox["bottom"],
                        uber_bbox["left"]:uber_bbox["right"],
                        :]
+
+        if DEBUG_MODE:
+            # show the cropped image but put it back to 0-255 range
+            debug_image = (cropped_data + 0.5) * pixel_depth
+            plt.imshow(debug_image, interpolation=None)
+            plt.show()
+
         # resize to 64x64
-        resized_data = ndimage.zoom(cropped_data, (64.0/cropped_data.shape[0], 64.0/cropped_data.shape[1], 1))
+        resized_data = ndimage.zoom(cropped_data, (64.0/cropped_data.shape[0], 64.0/cropped_data.shape[1], 1.0),
+                                    order=1, prefilter=False)
+        # resized_data = cropped_data  # works
+        # resized_data = ndimage.zoom(cropped_data, (0.995, 1.0, 1.0))
+
+        if DEBUG_MODE:
+            # show the cropped image but put it back to 0-1 range
+            debug_image = resized_data + 0.5
+            plt.imshow(debug_image)
+            plt.show()
 
         # randomly crop to 54x54
         # r = np.random.randint(0, 9, 2)
         # crop2_data = resized_data[r[0]:r[0]+54, r[1]:r[1]+54]
         # images[image_index, :, :, :] = crop2_data
-
-        if DEBUG_MODE:
-            plt.imshow(resized_data, interpolation=None)
-            plt.show()
 
         images[image_index, :, :, :] = resized_data
 
