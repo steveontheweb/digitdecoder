@@ -11,8 +11,8 @@ import tensorflow as tf
 import numpy as np
 import digitStruct
 
-DEBUG_MODE = False
-FORCE_REBUILD = False
+DEBUG_MODE = True
+FORCE_REBUILD = True
 
 last_percent_reported = None
 def download_progress_hook(count, blockSize, totalSize):
@@ -327,43 +327,27 @@ with graph.as_default():
     # Training computation.
     logits = model(tf_train_dataset)
     
-    # Separate out digits, nums
-    num_digits_logits = logits[:, 0:7]
-    digit1_logits = logits[:, 7:17]
-    digit2_logits = logits[:, 17:27]
-    digit3_logits = logits[:, 27:37]
-    digit4_logits = logits[:, 37:47]
-    digit5_logits = logits[:, 47:57]
-
-    num_digits_labels = tf_train_labels[:, 0:7]
-
     # make a vector that we can multiply the losses by (we should ignore any digit that "doesn't exist")
     num_digits_vector = [
-        tf.reduce_sum(num_digits_labels[:, 1:7]),
-        tf.reduce_sum(num_digits_labels[:, 2:7]),
-        tf.reduce_sum(num_digits_labels[:, 3:7]),
-        tf.reduce_sum(num_digits_labels[:, 4:7]),
-        tf.reduce_sum(num_digits_labels[:, 5:7])
+        tf.reduce_sum(tf_train_labels[:, 1:7]),
+        tf.reduce_sum(tf_train_labels[:, 2:7]),
+        tf.reduce_sum(tf_train_labels[:, 3:7]),
+        tf.reduce_sum(tf_train_labels[:, 4:7]),
+        tf.reduce_sum(tf_train_labels[:, 5:7])
     ]
-
-    digit1_labels = tf_train_labels[:, 7:17]
-    digit2_labels = tf_train_labels[:, 17:27]
-    digit3_labels = tf_train_labels[:, 27:37]
-    digit4_labels = tf_train_labels[:, 37:47]
-    digit5_labels = tf_train_labels[:, 47:57]
 
     #loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits))
     loss = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits(labels=num_digits_labels, logits=num_digits_logits) +
-        tf.multiply(num_digits_vector[0], tf.nn.softmax_cross_entropy_with_logits(labels=digit1_labels, logits=digit1_logits)) +
-        tf.multiply(num_digits_vector[1], tf.nn.softmax_cross_entropy_with_logits(labels=digit2_labels, logits=digit2_logits)) +
-        tf.multiply(num_digits_vector[2], tf.nn.softmax_cross_entropy_with_logits(labels=digit3_labels, logits=digit3_logits)) +
-        tf.multiply(num_digits_vector[3], tf.nn.softmax_cross_entropy_with_logits(labels=digit4_labels, logits=digit4_logits)) +
-        tf.multiply(num_digits_vector[4], tf.nn.softmax_cross_entropy_with_logits(labels=digit5_labels, logits=digit5_logits))
+        tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels[:, 0:7], logits=logits[:, 0:7]) +
+        tf.multiply(num_digits_vector[0], tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels[:, 7:17], logits=logits[:, 7:17])) +
+        tf.multiply(num_digits_vector[1], tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels[:, 17:27], logits=logits[:, 17:27])) +
+        tf.multiply(num_digits_vector[2], tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels[:, 27:37], logits=logits[:, 27:37])) +
+        tf.multiply(num_digits_vector[3], tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels[:, 37:47], logits=logits[:, 37:47])) +
+        tf.multiply(num_digits_vector[4], tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels[:, 47:57], logits=logits[:, 47:57]))
     )
 
     # Optimizer.
-    optimizer = tf.train.GradientDescentOptimizer(0.005).minimize(loss)
+    optimizer = tf.train.GradientDescentOptimizer(0.0001).minimize(loss)
 
     # Predictions for the training, validation, and test data.
     train_prediction = tf.nn.softmax(logits)
@@ -371,7 +355,7 @@ with graph.as_default():
     test_prediction = tf.nn.softmax(model(tf_test_dataset))
     single_prediction = tf.nn.softmax(model(tf_single_dataset), name="model")
 
-num_steps = 50000
+num_steps = 5000
 
 with tf.Session(graph=graph) as session:
     tf.global_variables_initializer().run()
