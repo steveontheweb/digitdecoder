@@ -7,12 +7,13 @@ from six.moves.urllib.request import urlretrieve
 from scipy import ndimage
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import time
 
 import numpy as np
 import digitStruct
 
-DEBUG_MODE = True
-FORCE_REBUILD = True
+DEBUG_MODE = False
+FORCE_REBUILD = False
 
 last_percent_reported = None
 
@@ -159,7 +160,7 @@ def load_images(image_folder, digit_data):
             plt.imshow(image_data, interpolation=None)
             plt.show()
 
-        image_data = (image_data - pixel_depth / 2) / pixel_depth
+        image_data = 2.0 * image_data / pixel_depth - 1.0   # range goes from [0,255] -> [-1.0, 1.0]
 
         # find uber bounding box
         uber_bbox = get_uber_bounding_box(data)
@@ -199,16 +200,23 @@ def load_images(image_folder, digit_data):
         label[len(data) if len(data) < 6 else 6] = 1.0  # num digits
         if 0 < len(data) < 6:
             for d in range(len(data)):
-                try:
+                digit = data[d]['digit']
+                if digit in range(10):  # sometimes the data might have "10"... just count it as "0"
                     label[7 + d*10 + data[d]['digit']] = 1.0  # digit d
-                except:
-                    # sometimes the data might have "10" as a digit or other strangeness... just skip the "1"
-                    pass
+
         labels[image_index, :] = label
 
-        image_index += 1
+        if DEBUG_MODE:
+            print("label details:")
+            print("  num digits: {}".format(label[0:7]))
+            for i in range(5):
+                print("  digit {d}: ({digit}), {hot_one}".format(
+                    d=i + 1,
+                    digit="?",  #[np.where(r == 1)[0] for r in label[(7 + 10*i):(17 + 10*i)]],
+                    hot_one=label[(7 + 10*i):(17 + 10*i)]
+                ))
 
-    print("labels = {}".format(labels))
+        image_index += 1
 
     return images, labels
 
@@ -303,6 +311,7 @@ with graph.as_default():
     tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
     tf_valid_dataset = tf.constant(valid_images)
     tf_test_dataset = tf.constant(test_images)
+    # single dataset for inference
     tf_single_dataset = tf.placeholder(tf.float32, shape=(1, image_size, image_size, num_channels), name="dataset")
 
     # Variables.
@@ -368,7 +377,7 @@ with graph.as_default():
     )
 
     # Optimizer.
-    optimizer = tf.train.GradientDescentOptimizer(0.0001).minimize(loss)
+    optimizer = tf.train.AdamOptimizer(1e-6).minimize(loss)
 
     # Predictions for the training, validation, and test data.
     train_prediction = tf.nn.softmax(logits)
@@ -376,7 +385,7 @@ with graph.as_default():
     test_prediction = tf.nn.softmax(model(tf_test_dataset))
     single_prediction = tf.nn.softmax(model(tf_single_dataset), name="model")
 
-num_steps = 5000
+num_steps = 50000
 
 with tf.Session(graph=graph) as session:
     tf.global_variables_initializer().run()
@@ -397,7 +406,8 @@ with tf.Session(graph=graph) as session:
     print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_labels))
 
     saver = tf.train.Saver()
-    inference_folder = os.path.join(os.path.dirname(__file__), "inference", strftime("%Y-%m-%d-%H-%M", gmtime()))
+    inference_folder = os.path.join(os.path.dirname(__file__), "inference",
+                                    time.strftime("%Y-%m-%d-%H-%M", time.gmtime()))
     if not os.path.exists(inference_folder):
         os.mkdir(inference_folder)
     saver.save(session, os.path.join(inference_folder, "model"))
